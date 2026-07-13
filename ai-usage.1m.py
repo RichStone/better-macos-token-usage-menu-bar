@@ -35,6 +35,7 @@ def save_state(state):
     tmp = CACHE_FILE + ".tmp"
     with open(tmp, "w") as f:
         json.dump(state, f)
+    os.chmod(tmp, 0o600)  # cached responses hold account metadata (email, plan, ids)
     os.replace(tmp, CACHE_FILE)
 
 

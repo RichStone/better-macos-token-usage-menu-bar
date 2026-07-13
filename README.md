@@ -23,9 +23,14 @@ Copilot (individual)
 Premium  92% left  ·  1382 of 1500  ·  resets Aug 1
 ```
 
-## Why not CodexBar & friends?
+## Why
 
-Apps that read the Claude Code OAuth token from the macOS Keychain re-trigger the credential prompt on every app update (each re-signed binary invalidates the "Always Allow"). This plugin reads the Keychain through Apple's own `/usr/bin/security` — which is never re-signed — so you approve **once** and never see the prompt again. Codex and Copilot tokens live in plain config files; no Keychain involved at all.
+I built this after using [CodexBar](https://github.com/steipete/CodexBar), which is impressive in scope but didn't fit how I want to glance at limits:
+
+- **It felt convoluted.** I want one fixed-width string and one dropdown, not a multi-provider app with modes and settings.
+- **The menu bar only shows the active model.** I want *all* my session and weekly meters visible at once, side by side.
+- **Inconsistent meter direction.** Limits count down toward 0 while extra usage counts up from $0. Here **everything reads as "how much is left"** — percentages and extra-usage dollars alike.
+- **Worst of all: the recurring Keychain prompts.** Every CodexBar update re-signs the app, which invalidates its "Always Allow" Keychain approval, so the credential prompt keeps coming back. This plugin reads the Keychain through Apple's own `/usr/bin/security` — a binary that never changes — so you approve **once** and never see the prompt again. Codex and Copilot tokens live in plain config files; no Keychain involved at all. (This convenience has a real trade-off — see [Security](#security).)
 
 ## Install
 
@@ -38,7 +43,9 @@ defaults write com.ameba.SwiftBar PluginDirectory "$HOME/.swiftbar"
 open -a SwiftBar
 ```
 
-On the first refresh macOS asks for Keychain access — click **Always Allow**. That's the last prompt you'll ever see.
+On the first refresh macOS asks for Keychain access — click **Always Allow**. That's the last prompt you'll ever see (understand what you're approving: [Security](#security)).
+
+You're curl-ing a script that will run every minute — it's ~300 lines of dependency-free Python, so read it first.
 
 Requirements: macOS with python3 (ships with the Xcode Command Line Tools) and whichever CLIs you use logged in — `claude`, `codex`, and/or Copilot in any editor. Providers you don't use just show a warning row; everything else keeps working.
 
@@ -74,6 +81,20 @@ open -a SwiftBar
 `Preferred Position 1` also pins the icon to the rightmost slot macOS allows third-party items. For a permanent fix, wrap those lines in a launchd agent (or login script) that runs them before starting SwiftBar.
 
 **Everything easy to tweak** at the top of the script: poll interval, stale threshold, color thresholds in `color_for()`, and the title format string in `main()`.
+
+## Security
+
+An honest assessment — including the parts that should give you pause.
+
+**What happens to your tokens.** On each refresh the script reads a token, holds it in process memory for a single HTTPS request to the provider that issued it, and exits. Tokens are never written to disk, never logged, and never sent anywhere except three hardcoded endpoints (`api.anthropic.com`, `chatgpt.com`, `api.github.com`) over TLS via the system trust store. The script is one file of stdlib-only Python — no pip dependencies, so the supply chain you need to trust is this file plus SwiftBar. Nothing auto-updates and the script cannot fetch or execute remote code; updates only happen when you pull them.
+
+**The real trade-off: "Always Allow" on the Keychain.** This is the one place the tool *weakens* your default security posture. Claude Code stores its OAuth token in the Keychain precisely so that each app must be individually approved to read it. Approving `/usr/bin/security` permanently removes that tripwire: afterwards, **any process running as your user can read the Claude Code token silently** with the same one-liner this script uses — the prompt that would have flagged it is exactly what you disabled. Two things put that in perspective rather than excuse it: (1) your Codex and Copilot tokens already sit in plain files (`~/.codex/auth.json`, `~/.config/github-copilot/apps.json`) that any user-land process can read — after Always Allow, the Claude token is simply as exposed as the other two already are; (2) malware running as your user has many comparable options anyway. But if an attacker-shaped process on your Mac is in your threat model, don't grant Always Allow — click Allow per prompt or remove the Claude section from the script. A stolen token here doesn't expose your password, but it does let someone use these AI services as you and burn your quota — treat it as sensitive.
+
+**What's cached on disk.** `~/.cache/ai-usage-bar/state.json` (file mode 600) keeps the last successful API responses so the widget survives network hiccups. It contains no tokens, but the provider responses include account metadata — plan names, account IDs, and (for Codex) your email. Delete it anytime.
+
+**Unofficial APIs.** All three endpoints are internal/undocumented — the same read-only calls the official `/usage` screens make, but not a supported integration. They can change shape or disappear without notice (one already changed shape once during development), and strictly speaking, internal endpoints may not be covered by the providers' terms of service. Read-only usage polling is a mild case, but you should know it's not blessed.
+
+**Residual gaps, stated plainly:** the Always Allow exposure above is permanent until you delete the Keychain item's ACL entry (or the item itself); the script trusts whatever is in the three local auth files without verifying what process put it there; and SwiftBar executes any script in your plugin folder, so that folder's write permissions are part of your attack surface.
 
 ## Credits
 
