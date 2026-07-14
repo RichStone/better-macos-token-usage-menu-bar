@@ -235,7 +235,7 @@ def main():
         cx_s = cx_w = None
 
     # U+2502 stands in for "|" — SwiftBar treats a literal pipe as its parameter separator
-    title = f"CC{pct(cc_s)}│{pct(cc_w)}-Cx{pct(cx_s)}│{pct(cx_w)}"
+    title = f"CC{pct(cc_s)}│{pct(cc_w)} Cx{pct(cx_s)}│{pct(cx_w)}"
     lowest = min((v for v in (cc_s, cc_w, cx_s, cx_w) if v is not None), default=None)
     # The menu bar title must NOT get the default dropdown color: the bar decides
     # its own text color based on the wallpaper behind it.
@@ -338,7 +338,7 @@ if __name__ == "__main__":
         # Never exit non-zero: SwiftBar would replace the whole widget with a "?" icon.
         # Keep a placeholder title and put the traceback in the dropdown instead.
         import traceback
-        print("CC?│?-Cx?│? | font=Menlo size=12")
+        print("CC?│? Cx?│? | font=Menlo size=12")
         print("---")
         print("plugin crashed | color=#ff5f57")
         for tb_line in traceback.format_exc().strip().splitlines():
