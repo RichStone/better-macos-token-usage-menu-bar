@@ -133,7 +133,7 @@ def fetch_copilot(state):
 
 
 def pct(v):
-    return "?" if v is None else str(round(v))
+    return "–" if v is None else str(round(v))
 
 
 def left(used):
@@ -157,8 +157,9 @@ def codex_windows(rate_limit):
 
 
 def win_left(window):
-    """Remaining % for a codex window; a missing window means untouched, i.e. all left."""
-    return left(window.get("used_percent")) if window else 100.0
+    """Remaining % for a codex window; None when the API doesn't report that window
+    (some plans only get a weekly limit — no session window exists to report)."""
+    return left(window.get("used_percent")) if window else None
 
 
 def color_for(remaining):
@@ -282,13 +283,15 @@ def main():
                 print(line(f"{label:<8} {pct(wl)}% left  ·  resets {fmt_reset(w.get('reset_at'))}",
                            color=color_for(wl), mono=True))
             else:
-                print(line(f"{label:<8} 100% left  ·  untouched", mono=True))
+                print(line(f"{label:<8} –  ·  not reported by the API", mono=True))
         for extra_lim in codex.get("additional_rate_limits") or []:
             rl = extra_lim.get("rate_limit") or {}
             es, ew = codex_windows(rl)
             s, w = win_left(es), win_left(ew)
-            print(line(f"{extra_lim.get('limit_name', 'other')}: session {pct(s)}% · weekly {pct(w)}% left",
-                       color=color_for(min(s, w)), mono=True))
+            s_txt = "–" if s is None else f"{pct(s)}%"
+            w_txt = "–" if w is None else f"{pct(w)}%"
+            print(line(f"{extra_lim.get('limit_name', 'other')}: session {s_txt} · weekly {w_txt} left",
+                       color=color_for(min((v for v in (s, w) if v is not None), default=None)), mono=True))
         credits = codex.get("credits") or {}
         if credits.get("has_credits"):
             print(line(f"Credits  {credits.get('balance')}", mono=True))

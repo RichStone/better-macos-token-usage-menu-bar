@@ -62,7 +62,7 @@ Every minute SwiftBar runs the script, which calls the same usage APIs the offic
 Details worth knowing:
 
 - **Claude is polled at most every 5 minutes** (the endpoint rate-limits under minutely polling); Codex and Copilot every minute. On HTTP 429 the script backs off and serves cached numbers, marked "showing cached from …".
-- **Codex windows are identified by duration** (5h vs 7d), not by their position in the response — the API nulls out idle windows and promotes whatever remains, so position lies. A missing window renders as "100% left · untouched".
+- **Codex windows are identified by duration** (5h vs 7d), not by their position in the response — the API nulls out unreported windows and promotes whatever remains, so position lies. A missing window means the API isn't reporting that limit at all (some plans currently get only a weekly window) and renders as "–  ·  not reported by the API".
 - **Tokens are never refreshed by the script** (that would invalidate your CLI's session). If a token expires, the dropdown says so — running the CLI once fixes it.
 - **Nothing leaves your machine** except the HTTPS calls to the three providers. Last-known-good data is cached in `~/.cache/ai-usage-bar/state.json`.
 - If the script ever crashes, the menu bar shows `CC?│?-Cx?│?` and the dropdown shows the traceback with a retry item.
@@ -85,6 +85,8 @@ open -a SwiftBar
 ## Security
 
 An honest assessment — including the parts that should give you pause.
+
+**Credit where it's due.** Of the three CLIs, Claude Code has the most secure token storage by default: it is the only one that puts its OAuth token in the macOS Keychain instead of a plain file on disk. That's exactly why it's the only provider with a permission prompt to deal with at all — and why this tool's central trade-off (below) exists: for convenience, we partially flatten Claude's stronger default down to the level the other two chose from the start.
 
 **What happens to your tokens.** On each refresh the script reads a token, holds it in process memory for a single HTTPS request to the provider that issued it, and exits. Tokens are never written to disk, never logged, and never sent anywhere except three hardcoded endpoints (`api.anthropic.com`, `chatgpt.com`, `api.github.com`) over TLS via the system trust store. The script is one file of stdlib-only Python — no pip dependencies, so the supply chain you need to trust is this file plus SwiftBar. Nothing auto-updates and the script cannot fetch or execute remote code; updates only happen when you pull them.
 
