@@ -67,6 +67,13 @@ Details worth knowing:
 - **Nothing leaves your machine** except the HTTPS calls to the three providers. Last-known-good data is cached in `~/.cache/ai-usage-bar/state.json`.
 - If the script ever crashes, the menu bar shows `CC?│?-Cx?│?` and the dropdown shows the traceback with a retry item.
 
+## Caveats
+
+- **The APIs are undocumented and drift.** When a provider changes a response shape, the widget degrades visibly (a `–`, a warning row with data age, or a traceback in the dropdown) rather than crashing or showing wrong numbers — but it may need a small code fix to catch up.
+- **Rate limits cost freshness, not uptime.** On HTTP 429 the widget serves cached data and retries within 15 minutes, ignoring absurd `Retry-After` values (14 hours has been observed).
+- **Expired tokens aren't auto-refreshed** (deliberately — see Security). The dropdown will tell you to run the CLI once.
+- **The icon-visibility fix runs at boot.** If SwiftBar is quit and reopened mid-session (e.g. by its updater), the icon can come back hidden until the next boot — see Troubleshooting.
+
 ## Troubleshooting
 
 **Icon vanished after a reboot?** SwiftBar records the status item as removed every time it quits, so it can come back hidden. Fix (find your key name with `defaults read com.ameba.SwiftBar | grep Visible`):
