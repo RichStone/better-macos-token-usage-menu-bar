@@ -65,7 +65,10 @@ def fetch_claude(state):
     except urllib.error.HTTPError as e:
         if e.code == 429:
             retry = e.headers.get("Retry-After", "")
-            state["claude_backoff_until"] = time.time() + (int(retry) if retry.isdigit() else 300)
+            delay = int(retry) if retry.isdigit() else 300
+            # Anthropic has been seen sending Retry-After: ~14 hours. Honoring that
+            # literally starves the widget all night; a 15-min cap is polite enough.
+            state["claude_backoff_until"] = time.time() + min(delay, 900)
             return None, "rate-limited by Anthropic"
         if e.code == 401:
             return None, "token expired — run Claude Code once to refresh"
@@ -134,6 +137,10 @@ def fetch_copilot(state):
 
 def pct(v):
     return "–" if v is None else str(round(v))
+
+
+def age_text(seconds):
+    return f"{seconds / 3600:.1f}h" if seconds >= 3600 else f"{max(seconds, 60) / 60:.0f}m"
 
 
 def left(used):
@@ -269,8 +276,8 @@ def main():
                        color=color_for(u_left), mono=True))
     if claude_err:
         print(line(f"⚠ {claude_err}", color="#febc2e"))
-        if claude and not claude_stale:
-            print(line(f"showing cached from {fmt_reset(state.get('claude', {}).get('ts'))}", color="gray"))
+        if claude:
+            print(line(f"showing data from {age_text(now - state.get('claude', {}).get('ts', now))} ago", color="gray"))
     print("---")
 
     # --- Codex section ---
@@ -300,8 +307,8 @@ def main():
             print(line(f"Reset credits available: {resets}", mono=True))
     if codex_err:
         print(line(f"⚠ {codex_err}", color="#febc2e"))
-        if codex and not codex_stale:
-            print(line(f"showing cached from {fmt_reset(state.get('codex', {}).get('ts'))}", color="gray"))
+        if codex:
+            print(line(f"showing data from {age_text(now - state.get('codex', {}).get('ts', now))} ago", color="gray"))
     print("---")
 
     # --- Copilot section (dropdown only, deliberately not in the menu bar title) ---
