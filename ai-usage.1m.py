@@ -194,9 +194,9 @@ def dot_for(remaining):
     if remaining is None:
         return "⚪"
     if remaining < LOW:
-        return "⭕"          # critical
+        return "🔴"          # critical
     if remaining < MID:
-        return "🟡"          # low-ish
+        return "🟠"          # low-ish
     return "🎾"              # healthy
 
 
@@ -266,7 +266,7 @@ def main():
     # One status dot per limit, bookending each provider's two numbers: session's
     # dot on the left, weekly's on the right. SwiftBar allows only one text color
     # on the title, but emoji keep their own, so every meter signals independently
-    # (🎾 healthy / 🟡 low-ish / ⭕ critical / ⚪ no data). Dropdown rows tint too.
+    # (🎾 healthy / 🟠 low-ish / 🔴 critical / ⚪ no data). Dropdown rows tint too.
     title = (f"{dot_for(cc_s)}CC{pct(cc_s)}│{pct(cc_w)}{dot_for(cc_w)}"
              f" {dot_for(cx_s)}Cx{pct(cx_s)}│{pct(cx_w)}{dot_for(cx_w)}")
     print(f"{title} | font=Menlo size=12")
