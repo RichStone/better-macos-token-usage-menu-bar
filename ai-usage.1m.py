@@ -169,14 +169,36 @@ def win_left(window):
     return left(window.get("used_percent")) if window else None
 
 
+# Everything is "% remaining". These thresholds and the palette are shared by the
+# dropdown row text and the menu-bar status dots.
+LOW, MID = 20, 60          # remaining < LOW = red, < MID = orange, >= MID = default
+COLOR_RED = "#e06c75"      # calm reddish
+COLOR_ORANGE = "#d9902b"   # orangeish
+
+
 def color_for(remaining):
     if remaining is None:
         return None
-    if remaining <= 10:
-        return "#ff5f57"
-    if remaining <= 30:
-        return "#febc2e"
+    if remaining < LOW:
+        return COLOR_RED
+    if remaining < MID:
+        return COLOR_ORANGE
     return None
+
+
+def dot_for(remaining):
+    """Per-provider status light for the menu bar. Emoji keep their own color
+    regardless of the title's single text color, which lets each provider signal
+    independently. Healthy (>= MID) or unknown shows no dot to keep the bar calm."""
+    if remaining is None or remaining >= MID:
+        return ""
+    return "🔴" if remaining < LOW else "🟠"
+
+
+def worst(*values):
+    """Lowest remaining % among the given meters, ignoring None (unreported/stale)."""
+    vals = [v for v in values if v is not None]
+    return min(vals) if vals else None
 
 
 def fmt_reset(value):
@@ -242,12 +264,13 @@ def main():
         cx_s = cx_w = None
 
     # U+2502 stands in for "|" — SwiftBar treats a literal pipe as its parameter separator
-    title = f"CC{pct(cc_s)}│{pct(cc_w)} Cx{pct(cx_s)}│{pct(cx_w)}"
-    lowest = min((v for v in (cc_s, cc_w, cx_s, cx_w) if v is not None), default=None)
-    # The menu bar title must NOT get the default dropdown color: the bar decides
-    # its own text color based on the wallpaper behind it.
-    tcolor = color_for(lowest)
-    print(f"{title} | font=Menlo size=12" + (f" color={tcolor}" if tcolor else ""))
+    # Per-provider status: SwiftBar allows only one text color on the menu bar
+    # title, so CC and Cx can't be tinted independently. Instead each provider
+    # gets its own colored dot (worst of its meters); text stays the bar's
+    # adaptive default. The dropdown rows below carry the actual colored numbers.
+    title = (f"CC{pct(cc_s)}│{pct(cc_w)}{dot_for(worst(cc_s, cc_w))}"
+             f" Cx{pct(cx_s)}│{pct(cx_w)}{dot_for(worst(cx_s, cx_w))}")
+    print(f"{title} | font=Menlo size=12")
     print("---")
 
     # --- Claude Code section ---
