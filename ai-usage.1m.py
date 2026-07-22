@@ -187,17 +187,28 @@ def color_for(remaining):
 
 
 def dot_for(remaining):
-    """Status light shown next to each individual limit in the menu bar. Emoji keep
-    their own color regardless of the title's single text color, so every meter
-    signals independently. None = no reported limit or briefly-stale data, shown
-    neutral rather than healthy so unknowns never read as green."""
-    if remaining is None:
-        return "⚪"
+    """Colored status light for a reported limit. Emoji keep their own color
+    regardless of the title's single text color, so every meter signals
+    independently: 🔴 critical / 🟠 low / 🎾 healthy."""
     if remaining < LOW:
-        return "🔴"          # critical
+        return "🔴"
     if remaining < MID:
-        return "🟠"          # low-ish
-    return "🎾"              # healthy
+        return "🟠"
+    return "🎾"
+
+
+def cell(remaining, unknown):
+    """(value, dot) for one limit in the menu bar title.
+    - unknown (provider data stale or never fetched): a plain '–', never a
+      healthy-looking ball — an unavailable meter must not read as full.
+    - reported-absent (remaining is None but the provider answered): no ceiling
+      on this meter, so 🎾 stands in for the number and carries the status itself.
+    - a real value: the number plus its colored dot."""
+    if unknown:
+        return "–", ""
+    if remaining is None:
+        return "🎾", ""
+    return str(round(remaining)), dot_for(remaining)
 
 
 def fmt_reset(value):
@@ -262,13 +273,20 @@ def main():
     if codex_stale:
         cx_s = cx_w = None
 
-    # U+2502 stands in for "|" — SwiftBar treats a literal pipe as its parameter separator
     # One status dot per limit, bookending each provider's two numbers: session's
-    # dot on the left, weekly's on the right. SwiftBar allows only one text color
-    # on the title, but emoji keep their own, so every meter signals independently
-    # (🎾 healthy / 🟠 low-ish / 🔴 critical / ⚪ no data). Dropdown rows tint too.
-    title = (f"{dot_for(cc_s)}CC{pct(cc_s)}│{pct(cc_w)}{dot_for(cc_w)}"
-             f" {dot_for(cx_s)}Cx{pct(cx_s)}│{pct(cx_w)}{dot_for(cx_w)}")
+    # dot on the left, weekly's on the right (│ is U+2502, not a literal pipe —
+    # SwiftBar treats "|" as its parameter separator). SwiftBar allows only one
+    # text color on the title, but emoji keep their own, so every meter signals
+    # independently: 🎾 healthy / 🟠 low / 🔴 critical, a bare 🎾 for a meter with
+    # no ceiling, and "–" when a provider's data is momentarily unavailable.
+    cc_unknown = not claude or claude_stale
+    cx_unknown = not codex or codex_stale
+    cc_sv, cc_sd = cell(cc_s, cc_unknown)
+    cc_wv, cc_wd = cell(cc_w, cc_unknown)
+    cx_sv, cx_sd = cell(cx_s, cx_unknown)
+    cx_wv, cx_wd = cell(cx_w, cx_unknown)
+    title = (f"{cc_sd}CC{cc_sv}│{cc_wv}{cc_wd}"
+             f" {cx_sd}Cx{cx_sv}│{cx_wv}{cx_wd}")
     print(f"{title} | font=Menlo size=12")
     print("---")
 
