@@ -3,10 +3,10 @@
 All your AI coding limits in the macOS menu bar — **Claude Code, OpenAI Codex, and GitHub Copilot** — with zero credential prompts, ever.
 
 ```
-CC49│88 Cx22🟠│78    ← menu bar: Claude session│weekly, Codex session│weekly
+🎾CC67│19⭕ ⚪Cx–│39🟡    ← session and weekly per provider, each with its own dot
 ```
 
-All numbers are **% remaining** (how much you have left, not how much you used). Each provider carries its own status dot so one running low never recolors the other: 🟠 below 60% left, 🔴 below 20%, nothing when healthy. (SwiftBar allows only one text color on the menu bar title, so per-provider signaling uses dots; the dropdown rows below tint the actual numbers with the same thresholds.) Click it for details:
+All numbers are **% remaining** (how much you have left, not how much you used). Every limit carries its own status dot, bookending each provider's session│weekly pair, so one meter running low never affects how the others read: **🎾** healthy (≥60%), **🟡** getting low (20–59%), **⭕** critical (<20%), **⚪** no reported limit or briefly-stale data. (SwiftBar allows only one text color on the menu bar title, so independent per-limit signaling uses emoji dots; the dropdown rows below also tint the numbers.) Click it for details:
 
 ```
 Claude Code

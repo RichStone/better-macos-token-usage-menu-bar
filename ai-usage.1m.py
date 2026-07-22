@@ -187,18 +187,17 @@ def color_for(remaining):
 
 
 def dot_for(remaining):
-    """Per-provider status light for the menu bar. Emoji keep their own color
-    regardless of the title's single text color, which lets each provider signal
-    independently. Healthy (>= MID) or unknown shows no dot to keep the bar calm."""
-    if remaining is None or remaining >= MID:
-        return ""
-    return "🔴" if remaining < LOW else "🟠"
-
-
-def worst(*values):
-    """Lowest remaining % among the given meters, ignoring None (unreported/stale)."""
-    vals = [v for v in values if v is not None]
-    return min(vals) if vals else None
+    """Status light shown next to each individual limit in the menu bar. Emoji keep
+    their own color regardless of the title's single text color, so every meter
+    signals independently. None = no reported limit or briefly-stale data, shown
+    neutral rather than healthy so unknowns never read as green."""
+    if remaining is None:
+        return "⚪"
+    if remaining < LOW:
+        return "⭕"          # critical
+    if remaining < MID:
+        return "🟡"          # low-ish
+    return "🎾"              # healthy
 
 
 def fmt_reset(value):
@@ -264,12 +263,12 @@ def main():
         cx_s = cx_w = None
 
     # U+2502 stands in for "|" — SwiftBar treats a literal pipe as its parameter separator
-    # Per-provider status: SwiftBar allows only one text color on the menu bar
-    # title, so CC and Cx can't be tinted independently. Instead each provider
-    # gets its own colored dot (worst of its meters); text stays the bar's
-    # adaptive default. The dropdown rows below carry the actual colored numbers.
-    title = (f"CC{pct(cc_s)}│{pct(cc_w)}{dot_for(worst(cc_s, cc_w))}"
-             f" Cx{pct(cx_s)}│{pct(cx_w)}{dot_for(worst(cx_s, cx_w))}")
+    # One status dot per limit, bookending each provider's two numbers: session's
+    # dot on the left, weekly's on the right. SwiftBar allows only one text color
+    # on the title, but emoji keep their own, so every meter signals independently
+    # (🎾 healthy / 🟡 low-ish / ⭕ critical / ⚪ no data). Dropdown rows tint too.
+    title = (f"{dot_for(cc_s)}CC{pct(cc_s)}│{pct(cc_w)}{dot_for(cc_w)}"
+             f" {dot_for(cx_s)}Cx{pct(cx_s)}│{pct(cx_w)}{dot_for(cx_w)}")
     print(f"{title} | font=Menlo size=12")
     print("---")
 
