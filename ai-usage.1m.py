@@ -23,8 +23,12 @@ STALE_AFTER = 30 * 60  # mark cached data stale after 30 min
 CLAUDE_POLL = 5 * 60  # Anthropic's usage endpoint 429s under 1-minute polling; ask it less often
 
 # Monthly billing-cycle renewal day (1-31) per provider, shown in the dropdown as
-# the next occurrence. Neither usage API reports this, so set it here or leave None
-# to hide the row. Days past a month's length clamp to its last day (e.g. 31 -> Feb 28).
+# the next occurrence (neither usage API reports it). Configure without editing this
+# file — a re-download would overwrite it — by creating the JSON config below with
+# {"claude_renewal_day": 1, "codex_renewal_day": 10}. The constants are the fallback
+# when a key is absent; None hides the row. Days past a month's length clamp to its
+# last day (e.g. 31 -> Feb 28).
+CONFIG_FILE = os.path.expanduser("~/.config/ai-usage-bar/config.json")
 CLAUDE_RENEWAL_DAY = None
 CODEX_RENEWAL_DAY = None
 
@@ -150,6 +154,24 @@ def age_text(seconds):
     return f"{seconds / 3600:.1f}h" if seconds >= 3600 else f"{max(seconds, 60) / 60:.0f}m"
 
 
+def read_config():
+    """User settings from CONFIG_FILE (renewal days etc.); {} if absent/unreadable."""
+    try:
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def valid_day(val):
+    """Coerce a config/constant value to a 1-31 day-of-month, or None if unusable."""
+    try:
+        d = int(val)
+    except (TypeError, ValueError):
+        return None
+    return d if 1 <= d <= 31 else None
+
+
 def next_renewal(day):
     """Next date on/after today falling on `day` of the month (clamped to the
     month's length), formatted 'Mon D'. None when the day isn't configured."""
@@ -268,6 +290,10 @@ def main():
     state = load_state()
     now = time.time()
 
+    cfg = read_config()
+    claude_day = valid_day(cfg.get("claude_renewal_day", CLAUDE_RENEWAL_DAY))
+    codex_day = valid_day(cfg.get("codex_renewal_day", CODEX_RENEWAL_DAY))
+
     claude, claude_err = fetch_claude(state)
     codex, codex_err = fetch_codex(state)
     copilot, copilot_err = fetch_copilot(state)
@@ -336,7 +362,7 @@ def main():
             remaining = max(0.0, limit - used)
             print(line(f"Extra    ${remaining:,.2f} of ${limit:,.2f} left  ({pct(u_left)}%)",
                        color=color_for(u_left), mono=True))
-    renewal = next_renewal(CLAUDE_RENEWAL_DAY)
+    renewal = next_renewal(claude_day)
     if renewal:
         print(line(f"{'Renews':<8} {renewal}  ·  monthly plan", mono=True))
     if claude_err:
@@ -370,7 +396,7 @@ def main():
         resets = (codex.get("rate_limit_reset_credits") or {}).get("available_count")
         if resets:
             print(line(f"Reset credits available: {resets}", mono=True))
-    renewal = next_renewal(CODEX_RENEWAL_DAY)
+    renewal = next_renewal(codex_day)
     if renewal:
         print(line(f"{'Renews':<8} {renewal}  ·  monthly plan", mono=True))
     if codex_err:

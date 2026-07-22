@@ -87,9 +87,15 @@ open -a SwiftBar
 
 `Preferred Position 1` also pins the icon to the rightmost slot macOS allows third-party items. For a permanent fix, wrap those lines in a launchd agent (or login script) that runs them before starting SwiftBar.
 
-**Monthly plan renewal date.** Neither usage API exposes your billing-cycle renewal, so set `CLAUDE_RENEWAL_DAY` / `CODEX_RENEWAL_DAY` (1–31) near the top of the script to show a "Renews <date>" row in each provider's dropdown; leave them `None` to hide it. The widget computes the next occurrence and clamps to short months.
+**Monthly plan renewal date.** Neither usage API exposes your billing-cycle renewal, so it's a manual setting that adds a "Renews <date>" row to each provider's dropdown (the widget computes the next occurrence and clamps to short months). Configure it in `~/.config/ai-usage-bar/config.json` — this survives re-downloading the script:
 
-**Everything easy to tweak** at the top of the script: poll interval, stale threshold, color thresholds in `color_for()`, renewal days, and the title format string in `main()`.
+```json
+{ "claude_renewal_day": 1, "codex_renewal_day": 10 }
+```
+
+Omit a key (or the whole file) to hide that row. As a fallback you can instead edit the `CLAUDE_RENEWAL_DAY` / `CODEX_RENEWAL_DAY` constants at the top of the script, but the config file is preferred since a re-download overwrites the script.
+
+**Everything easy to tweak** at the top of the script: poll interval, stale threshold, and color thresholds in `color_for()`. Renewal days live in the config file above.
 
 ## Security
 
