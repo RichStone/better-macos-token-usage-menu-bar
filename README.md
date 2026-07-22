@@ -87,7 +87,9 @@ open -a SwiftBar
 
 `Preferred Position 1` also pins the icon to the rightmost slot macOS allows third-party items. For a permanent fix, wrap those lines in a launchd agent (or login script) that runs them before starting SwiftBar.
 
-**Everything easy to tweak** at the top of the script: poll interval, stale threshold, color thresholds in `color_for()`, and the title format string in `main()`.
+**Monthly plan renewal date.** Neither usage API exposes your billing-cycle renewal, so set `CLAUDE_RENEWAL_DAY` / `CODEX_RENEWAL_DAY` (1–31) near the top of the script to show a "Renews <date>" row in each provider's dropdown; leave them `None` to hide it. The widget computes the next occurrence and clamps to short months.
+
+**Everything easy to tweak** at the top of the script: poll interval, stale threshold, color thresholds in `color_for()`, renewal days, and the title format string in `main()`.
 
 ## Security
 

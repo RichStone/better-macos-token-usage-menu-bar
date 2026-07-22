@@ -9,17 +9,24 @@
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
 
+import calendar
 import json
 import os
 import subprocess
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime
 
 CACHE_FILE = os.path.expanduser("~/.cache/ai-usage-bar/state.json")
 STALE_AFTER = 30 * 60  # mark cached data stale after 30 min
 CLAUDE_POLL = 5 * 60  # Anthropic's usage endpoint 429s under 1-minute polling; ask it less often
+
+# Monthly billing-cycle renewal day (1-31) per provider, shown in the dropdown as
+# the next occurrence. Neither usage API reports this, so set it here or leave None
+# to hide the row. Days past a month's length clamp to its last day (e.g. 31 -> Feb 28).
+CLAUDE_RENEWAL_DAY = None
+CODEX_RENEWAL_DAY = None
 
 
 def load_state():
@@ -141,6 +148,21 @@ def pct(v):
 
 def age_text(seconds):
     return f"{seconds / 3600:.1f}h" if seconds >= 3600 else f"{max(seconds, 60) / 60:.0f}m"
+
+
+def next_renewal(day):
+    """Next date on/after today falling on `day` of the month (clamped to the
+    month's length), formatted 'Mon D'. None when the day isn't configured."""
+    if not day:
+        return None
+    today = date.today()
+    def on(y, m):
+        return date(y, m, min(day, calendar.monthrange(y, m)[1]))
+    d = on(today.year, today.month)
+    if d < today:
+        y, m = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+        d = on(y, m)
+    return d.strftime("%b %-d")
 
 
 def left(used):
@@ -314,6 +336,9 @@ def main():
             remaining = max(0.0, limit - used)
             print(line(f"Extra    ${remaining:,.2f} of ${limit:,.2f} left  ({pct(u_left)}%)",
                        color=color_for(u_left), mono=True))
+    renewal = next_renewal(CLAUDE_RENEWAL_DAY)
+    if renewal:
+        print(line(f"{'Renews':<8} {renewal}  ·  monthly plan", mono=True))
     if claude_err:
         print(line(f"⚠ {claude_err}", color="#febc2e"))
         if claude:
@@ -345,6 +370,9 @@ def main():
         resets = (codex.get("rate_limit_reset_credits") or {}).get("available_count")
         if resets:
             print(line(f"Reset credits available: {resets}", mono=True))
+    renewal = next_renewal(CODEX_RENEWAL_DAY)
+    if renewal:
+        print(line(f"{'Renews':<8} {renewal}  ·  monthly plan", mono=True))
     if codex_err:
         print(line(f"⚠ {codex_err}", color="#febc2e"))
         if codex:
