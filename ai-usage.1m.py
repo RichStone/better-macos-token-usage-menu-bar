@@ -362,6 +362,12 @@ def main():
             remaining = max(0.0, limit - used)
             print(line(f"Extra    ${remaining:,.2f} of ${limit:,.2f} left  ({pct(u_left)}%)",
                        color=color_for(u_left), mono=True))
+        elif extra.get("credits_ever_enabled"):
+            # Anthropic nulls the dollar fields and flips is_enabled off once extra
+            # usage is exhausted/disabled — keep the row so it doesn't just vanish.
+            reason = (extra.get("disabled_reason") or "off").replace("_", " ")
+            out = extra.get("disabled_reason") == "out_of_credits"
+            print(line(f"Extra    {reason}", color=(COLOR_RED if out else None), mono=True))
     renewal = next_renewal(claude_day)
     if renewal:
         print(line(f"{'Renews':<8} {renewal}  ·  monthly plan", mono=True))
