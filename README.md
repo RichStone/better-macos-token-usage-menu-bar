@@ -3,10 +3,10 @@
 All your AI coding limits in the macOS menu bar — **Claude Code, OpenAI Codex, and GitHub Copilot** — with zero credential prompts, ever.
 
 ```
-🎾CC67│19🔴 Cx🎾│39🟠    ← session and weekly per provider, each with its own dot
+🟢CC67│19🔴 Cx│39🟠    ← session and weekly per provider, each with its own dot
 ```
 
-All numbers are **% remaining** (how much you have left, not how much you used). Every limit carries its own status dot, bookending each provider's session│weekly pair, so one meter running low never affects how the others read: **🎾** healthy (≥60%), **🟠** getting low (20–59%), **🔴** critical (<20%). A meter with no ceiling (e.g. Codex has no session window on some plans) shows a bare **🎾** in place of the number; a **–** means that provider's data is momentarily unavailable (never a ball, so an unknown never reads as full). (SwiftBar allows only one text color on the menu bar title, so independent per-limit signaling uses emoji dots; the dropdown rows below also tint the numbers.) Click it for details:
+All numbers are **% remaining** (how much you have left, not how much you used). Session/weekly meters (Claude's 5h/7d, Codex's own windows) are colored by **pace** — are you spending faster than a straight line to the next reset — not just the raw %, so "92% left" can still show yellow if you burned a chunk right after a reset: **🟢** on pace or better, **🟡** a little behind, **🟠** well behind (or ≤15% left regardless of pace), **🔴** way behind (or ≤5% left regardless of pace). Meters with no reset line (Copilot, extra usage, model-scoped weekly caps) use a plain remaining-% scale instead: **🟢** ≥60%, **🟠** 20–59%, **🔴** <20%. A window the API doesn't report at all (e.g. Codex has no session window on some plans) drops its value and dot rather than showing a ball that would read as "all good"; a **–** means that provider's data is momentarily unavailable. (SwiftBar allows only one text color on the menu bar title, so independent per-limit signaling uses emoji dots; the dropdown rows tint their numbers too, and an "ℹ️ How the colors work" row at the bottom of the dropdown explains all of this in the app itself.) Click it for details:
 
 ```
 Claude Code
@@ -95,7 +95,7 @@ open -a SwiftBar
 
 Omit a key (or the whole file) to hide that row. As a fallback you can instead edit the `CLAUDE_RENEWAL_DAY` / `CODEX_RENEWAL_DAY` constants at the top of the script, but the config file is preferred since a re-download overwrites the script.
 
-**Everything easy to tweak** at the top of the script: poll interval, stale threshold, and color thresholds in `color_for()`. Renewal days live in the config file above.
+**Everything easy to tweak** at the top of the script: poll interval, stale threshold, flat color thresholds in `color_for()`, and the pace-based `PACE_YELLOW`/`PACE_ORANGE`/`PACE_RED`/`ABS_ORANGE`/`ABS_RED` constants that grade session/weekly meters. Renewal days live in the config file above.
 
 ## Security
 

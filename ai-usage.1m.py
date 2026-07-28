@@ -16,7 +16,10 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+
+FIVE_HOUR_SECONDS = 5 * 3600
+SEVEN_DAY_SECONDS = 7 * 86400
 
 CACHE_FILE = os.path.expanduser("~/.cache/ai-usage-bar/state.json")
 STALE_AFTER = 30 * 60  # mark cached data stale after 30 min
@@ -60,6 +63,10 @@ def fetch_claude(state):
     """Returns (data, error). Token read via Apple's security tool — silent after one Always Allow."""
     if time.time() - state.get("claude", {}).get("ts", 0) < CLAUDE_POLL:
         return None, None  # cache is recent enough; main() falls back to it silently
+    # Honor the 429 backoff. Do NOT poke the endpoint every tick while stale — this
+    # endpoint 429s hard under sub-minute polling and hammering it only lengthens
+    # the ban. Staleness is instead papered over by rolling windows forward locally
+    # (see _roll) so the display stays sane until the backoff lets a real fetch land.
     if state.get("claude_backoff_until", 0) > time.time():
         return None, "rate-limited, backing off"
     try:
@@ -215,12 +222,103 @@ def win_left(window):
 
 # Everything is "% remaining". These thresholds and the palette are shared by the
 # dropdown row text and the menu-bar status dots.
-LOW, MID = 20, 60          # remaining < LOW = red, < MID = orange, >= MID = default
+LOW, MID = 20, 60          # absolute remaining-% cutoffs for NON-windowed meters
+                           # (Copilot quotas, credit balances) that have no reset line
 COLOR_RED = "#e06c75"      # calm reddish
 COLOR_ORANGE = "#d9902b"   # orangeish
+COLOR_YELLOW = "#c9a227"   # muted gold
+
+# --- pace-based severity for rolling windows ---------------------------------
+# A rolling limit (Claude 5h/7d, Codex session/weekly) refills fully at reset, so
+# the useful question isn't "how much is left" but "am I burning faster than it
+# refills?" The even-burn line is 100% * (fraction of the window still ahead):
+# right after a reset you should still have ~100%; at reset, ~0%. Sitting AT or
+# ABOVE that line is green; how many percentage points you've fallen BELOW it
+# grades yellow -> orange -> red. A hard absolute floor keeps a nearly empty meter
+# hot even when it is minutes from resetting.
+#
+# Example (weekly = 100% over 7 days => ~14.3%/day of even burn): on day 1 you can
+# spend up to ~14% and stay on the line (green); spend more and you dip below it
+# (yellow), and the further below, the hotter — because at that rate you run dry
+# before the week is out.
+PACE_YELLOW = 6            # <=6pp behind the line still reads green (burst tolerance)
+PACE_ORANGE = 9            # >9pp behind -> orange (was 12; catches "well behind" sooner)
+PACE_RED = 30              # >30pp behind -> red
+ABS_ORANGE = 15            # <=15% left is orange no matter the pace
+ABS_RED = 5                # <=5% left is red no matter the pace
+
+_SEV_ORDER = {"green": 0, "yellow": 1, "orange": 2, "red": 3}
+SEV_COLOR = {"green": None, "yellow": COLOR_YELLOW, "orange": COLOR_ORANGE, "red": COLOR_RED}
+SEV_DOT = {"green": "🟢", "yellow": "🟡", "orange": "🟠", "red": "🔴"}
+
+# Plain-language explanation shown at the bottom of the dropdown (see main()).
+# Keep this in sync by hand if the thresholds above change.
+HOW_COLORS_WORK = [
+    "Every number is % LEFT, not used — a bigger number is always better.",
+    "Session/Weekly meters color by PACE: are you spending faster than a",
+    "  straight line to the next reset, not just 'is the number big?'",
+    "🟢 on pace or better   🟡 a bit behind   🟠 well behind   🔴 way behind",
+    "Example: weekly just reset, but you already burned 8% in the first hour —",
+    "  your 'even' pace is ~0% used so far, so you're already behind → 🟡,",
+    "  even though '92% left' sounds great on its own.",
+    "Regardless of pace: ≤15% left is always 🟠, ≤5% left is always 🔴 —",
+    "  you're close to empty and pace stops mattering.",
+    "A dash (–) means that number failed to load this cycle — NOT that it's full.",
+    "Other rows (Copilot, extra $, model-scoped weekly) use plain % left:",
+    "  🟢 ≥60%   🟠 20-59%   🔴 <20%.",
+]
+
+
+def reset_epoch(value):
+    """A reset time as epoch seconds (accepts epoch or ISO string), or None."""
+    try:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        return datetime.fromisoformat(value).timestamp()
+    except Exception:
+        return None
+
+
+def _roll(window, used_key, reset_key, window_seconds, now):
+    """Advance one rolling-window dict IN PLACE if its reset time has already passed.
+    A passed reset means the window has refilled, so used%->0 and the reset jumps to
+    the next period boundary; the dict is tagged _rolled so the UI can flag the value
+    as an unconfirmed estimate. No-op when the reset is still ahead — i.e. whenever the
+    data is current (a fresh fetch always reports a future reset). This is what keeps a
+    cache that straddles a reset (API unreachable across the boundary) from showing
+    stale pre-reset numbers, e.g. '1% left' hours after the weekly actually reset."""
+    if not isinstance(window, dict) or not window_seconds:
+        return
+    reset = reset_epoch(window.get(reset_key))
+    if reset is None or reset > now:
+        return
+    periods = int((now - reset) // window_seconds) + 1
+    window[used_key] = 0.0
+    window[reset_key] = datetime.fromtimestamp(reset + periods * window_seconds, tz=timezone.utc).isoformat()
+    window["_rolled"] = True
+
+
+def severity(remaining, reset_at=None, window_seconds=None, now=None):
+    """'green'|'yellow'|'orange'|'red' for a meter, or None if remaining is unknown.
+    With reset_at + window_seconds it grades by PACE (burn vs. the even-burn line)
+    and returns the hotter of that and an absolute floor; without them it falls back
+    to the absolute floor alone."""
+    if remaining is None:
+        return None
+    abs_sev = "red" if remaining <= ABS_RED else "orange" if remaining <= ABS_ORANGE else "green"
+    pace_sev = "green"
+    if reset_at and window_seconds and now is not None:
+        left_frac = max(0.0, min(1.0, (reset_at - now) / window_seconds))
+        behind = 100.0 * left_frac - remaining      # >0 => spending ahead of the refill
+        pace_sev = ("red" if behind > PACE_RED else "orange" if behind > PACE_ORANGE
+                    else "yellow" if behind > PACE_YELLOW else "green")
+    return max(abs_sev, pace_sev, key=_SEV_ORDER.get)
 
 
 def color_for(remaining):
+    """Absolute-only text color for non-windowed meters (no even-burn line)."""
     if remaining is None:
         return None
     if remaining < LOW:
@@ -230,29 +328,18 @@ def color_for(remaining):
     return None
 
 
-def dot_for(remaining):
-    """Colored status light for a reported limit. Emoji keep their own color
-    regardless of the title's single text color, so every meter signals
-    independently: 🔴 critical / 🟠 low / 🎾 healthy."""
-    if remaining < LOW:
-        return "🔴"
-    if remaining < MID:
-        return "🟠"
-    return "🎾"
-
-
-def cell(remaining, unknown):
+def cell(remaining, unknown, sev="green"):
     """(value, dot) for one limit in the menu bar title.
-    - unknown (provider data stale or never fetched): a plain '–', never a
-      healthy-looking ball — an unavailable meter must not read as full.
-    - reported-absent (remaining is None but the provider answered): no ceiling
-      on this meter, so 🎾 stands in for the number and carries the status itself.
-    - a real value: the number plus its colored dot."""
+    - unknown (data stale or never fetched): a plain '–', never a healthy ball.
+    - reported-absent (remaining is None but the provider answered): this window
+      isn't reported at all (e.g. Codex session on some plans) — omit the value
+      and dot entirely rather than implying "all good" with a green ball.
+    - a real value: the number plus its pace-colored dot (🟢/🟡/🟠/🔴)."""
     if unknown:
         return "–", ""
     if remaining is None:
-        return "🎾", ""
-    return str(round(remaining)), dot_for(remaining)
+        return "", ""
+    return str(round(remaining)), SEV_DOT.get(sev, "")
 
 
 def fmt_reset(value):
@@ -309,6 +396,20 @@ def main():
     claude_stale = claude_err and (now - state.get("claude", {}).get("ts", 0)) > STALE_AFTER
     codex_stale = codex_err and (now - state.get("codex", {}).get("ts", 0)) > STALE_AFTER
 
+    # Roll any window whose reset has passed forward to the current period, so a cache
+    # that straddled a reset boundary stops showing stale pre-reset numbers. Applied
+    # after save_state so the estimate is never persisted — the next successful fetch
+    # replaces it with real data.
+    if claude:
+        _roll(claude.get("five_hour"), "utilization", "resets_at", FIVE_HOUR_SECONDS, now)
+        _roll(claude.get("seven_day"), "utilization", "resets_at", SEVEN_DAY_SECONDS, now)
+    if codex:
+        for _rl in [(codex.get("rate_limit") or {})] + [
+                (x.get("rate_limit") or {}) for x in (codex.get("additional_rate_limits") or [])]:
+            for _w in (_rl.get("primary_window"), _rl.get("secondary_window")):
+                if isinstance(_w, dict):
+                    _roll(_w, "used_percent", "reset_at", _w.get("limit_window_seconds"), now)
+
     cc_s = left((claude.get("five_hour") or {}).get("utilization")) if claude else None
     cc_w = left((claude.get("seven_day") or {}).get("utilization")) if claude else None
     cx = (codex or {}).get("rate_limit") or {}
@@ -321,18 +422,30 @@ def main():
     if codex_stale:
         cx_s = cx_w = None
 
+    # Pace-based severity per window: how far the meter has fallen below its
+    # even-burn line, hotter the further behind (see severity()). Claude's window
+    # lengths are fixed (5h / 7d); Codex reports its own limit_window_seconds.
+    cc_s_sev = severity(cc_s, reset_epoch((claude.get("five_hour") or {}).get("resets_at")) if claude else None,
+                        FIVE_HOUR_SECONDS, now)
+    cc_w_sev = severity(cc_w, reset_epoch((claude.get("seven_day") or {}).get("resets_at")) if claude else None,
+                        SEVEN_DAY_SECONDS, now)
+    cx_s_sev = severity(cx_s, reset_epoch((cx_session or {}).get("reset_at")),
+                        (cx_session or {}).get("limit_window_seconds"), now)
+    cx_w_sev = severity(cx_w, reset_epoch((cx_weekly or {}).get("reset_at")),
+                        (cx_weekly or {}).get("limit_window_seconds"), now)
+
     # One status dot per limit, bookending each provider's two numbers: session's
     # dot on the left, weekly's on the right (│ is U+2502, not a literal pipe —
     # SwiftBar treats "|" as its parameter separator). SwiftBar allows only one
     # text color on the title, but emoji keep their own, so every meter signals
-    # independently: 🎾 healthy / 🟠 low / 🔴 critical, a bare 🎾 for a meter with
-    # no ceiling, and "–" when a provider's data is momentarily unavailable.
+    # its pace independently: 🟢 on-track / 🟡 slipping / 🟠 behind / 🔴 way behind,
+    # a bare 🟢 for a meter with no ceiling, and "–" when data is unavailable.
     cc_unknown = not claude or claude_stale
     cx_unknown = not codex or codex_stale
-    cc_sv, cc_sd = cell(cc_s, cc_unknown)
-    cc_wv, cc_wd = cell(cc_w, cc_unknown)
-    cx_sv, cx_sd = cell(cx_s, cx_unknown)
-    cx_wv, cx_wd = cell(cx_w, cx_unknown)
+    cc_sv, cc_sd = cell(cc_s, cc_unknown, cc_s_sev)
+    cc_wv, cc_wd = cell(cc_w, cc_unknown, cc_w_sev)
+    cx_sv, cx_sd = cell(cx_s, cx_unknown, cx_s_sev)
+    cx_wv, cx_wd = cell(cx_w, cx_unknown, cx_w_sev)
     title = (f"{cc_sd}CC{cc_sv}│{cc_wv}{cc_wd}"
              f" {cx_sd}Cx{cx_sv}│{cx_wv}{cx_wd}")
     print(f"{title} | font=Menlo size=12")
@@ -343,10 +456,12 @@ def main():
     if claude:
         fh, sd = claude.get("five_hour") or {}, claude.get("seven_day") or {}
         fh_left, sd_left = left(fh.get("utilization")), left(sd.get("utilization"))
-        print(line(f"Session  {pct(fh_left)}% left  ·  resets {fmt_reset(fh.get('resets_at'))}",
-                   color=color_for(fh_left), mono=True))
-        print(line(f"Weekly   {pct(sd_left)}% left  ·  resets {fmt_reset(sd.get('resets_at'))}",
-                   color=color_for(sd_left), mono=True))
+        fh_m = "~" if fh.get("_rolled") else ""   # ~ = estimated: window reset locally, awaiting a fresh fetch
+        sd_m = "~" if sd.get("_rolled") else ""
+        print(line(f"Session  {fh_m}{pct(fh_left)}% left  ·  resets {fmt_reset(fh.get('resets_at'))}",
+                   color=SEV_COLOR.get(severity(fh_left, reset_epoch(fh.get('resets_at')), FIVE_HOUR_SECONDS, now)), mono=True))
+        print(line(f"Weekly   {sd_m}{pct(sd_left)}% left  ·  resets {fmt_reset(sd.get('resets_at'))}",
+                   color=SEV_COLOR.get(severity(sd_left, reset_epoch(sd.get('resets_at')), SEVEN_DAY_SECONDS, now)), mono=True))
         for lim in claude.get("limits") or []:
             if lim.get("kind") == "weekly_scoped":
                 name = ((lim.get("scope") or {}).get("model") or {}).get("display_name") or "scoped"
@@ -366,8 +481,8 @@ def main():
             # Anthropic nulls the dollar fields and flips is_enabled off once extra
             # usage is exhausted/disabled — keep the row so it doesn't just vanish.
             reason = (extra.get("disabled_reason") or "off").replace("_", " ")
-            out = extra.get("disabled_reason") == "out_of_credits"
-            print(line(f"Extra    {reason}", color=(COLOR_RED if out else None), mono=True))
+            spent = extra.get("disabled_reason") == "out_of_credits" or extra.get("spend_limit_reached")
+            print(line(f"Extra    {reason}", color=(COLOR_RED if spent else None), mono=True))
     renewal = next_renewal(claude_day)
     if renewal:
         print(line(f"{'Renews':<8} {renewal}  ·  monthly plan", mono=True))
@@ -384,8 +499,10 @@ def main():
         for label, w in (("Session", cx_session), ("Weekly", cx_weekly)):
             if w:
                 wl = left(w.get("used_percent"))
-                print(line(f"{label:<8} {pct(wl)}% left  ·  resets {fmt_reset(w.get('reset_at'))}",
-                           color=color_for(wl), mono=True))
+                m = "~" if w.get("_rolled") else ""
+                sev = severity(wl, reset_epoch(w.get("reset_at")), w.get("limit_window_seconds"), now)
+                print(line(f"{label:<8} {m}{pct(wl)}% left  ·  resets {fmt_reset(w.get('reset_at'))}",
+                           color=SEV_COLOR.get(sev), mono=True))
             else:
                 print(line(f"{label:<8} –  ·  not reported by the API", mono=True))
         for extra_lim in codex.get("additional_rate_limits") or []:
@@ -436,6 +553,10 @@ def main():
 
     print(line(f"Updated {datetime.now().strftime('%H:%M:%S')} · refresh", color="gray", refresh=True))
     print(line("claude.ai usage settings", href="https://claude.ai/settings/usage", color="gray"))
+    print("---")
+    print(line("ℹ️  How the colors work", color="gray"))
+    for tip in HOW_COLORS_WORK:
+        print(line(f"--{tip}", color="gray", mono=True))
 
 
 if __name__ == "__main__":
