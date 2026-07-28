@@ -263,6 +263,8 @@ HOW_COLORS_WORK = [
     "  even though '92% left' sounds great on its own.",
     "Regardless of pace: ≤15% left is always 🟠, ≤5% left is always 🔴 —",
     "  you're close to empty and pace stops mattering.",
+    "0% left shows ☠️ instead of 🔴 — you're not just critical, you're out.",
+    "If weekly hits ☠️, session shows ☠️ too — a dead weekly blocks you either way.",
     "A dash (–) means that number failed to load this cycle — NOT that it's full.",
     "Other rows (Copilot, extra $, model-scoped weekly) use plain % left:",
     "  🟢 ≥60%   🟠 20-59%   🔴 <20%.",
@@ -334,11 +336,16 @@ def cell(remaining, unknown, sev="green"):
     - reported-absent (remaining is None but the provider answered): this window
       isn't reported at all (e.g. Codex session on some plans) — omit the value
       and dot entirely rather than implying "all good" with a green ball.
+    - zero (rounds to 0% left): ☠️ instead of the usual red dot — you're not just
+      critical, you're actually out. A distinct glyph, not just another dot,
+      so it can't be misread as a healthy ball at a glance.
     - a real value: the number plus its pace-colored dot (🟢/🟡/🟠/🔴)."""
     if unknown:
         return "–", ""
     if remaining is None:
         return "", ""
+    if round(remaining) <= 0:
+        return "0", "☠️"
     return str(round(remaining)), SEV_DOT.get(sev, "")
 
 
@@ -438,14 +445,21 @@ def main():
     # dot on the left, weekly's on the right (│ is U+2502, not a literal pipe —
     # SwiftBar treats "|" as its parameter separator). SwiftBar allows only one
     # text color on the title, but emoji keep their own, so every meter signals
-    # its pace independently: 🟢 on-track / 🟡 slipping / 🟠 behind / 🔴 way behind,
-    # a bare 🟢 for a meter with no ceiling, and "–" when data is unavailable.
+    # its pace independently: 🟢 on-track / 🟡 slipping / 🟠 behind / 🔴 way behind /
+    # ☠️ out, nothing for a window the API doesn't report, and "–" when data is
+    # unavailable.
     cc_unknown = not claude or claude_stale
     cx_unknown = not codex or codex_stale
     cc_sv, cc_sd = cell(cc_s, cc_unknown, cc_s_sev)
     cc_wv, cc_wd = cell(cc_w, cc_unknown, cc_w_sev)
     cx_sv, cx_sd = cell(cx_s, cx_unknown, cx_s_sev)
     cx_wv, cx_wd = cell(cx_w, cx_unknown, cx_w_sev)
+    # A dead weekly limit blocks you regardless of session headroom — flag session
+    # ☠️ too (only when it has a dot to override; a blank/absent session stays blank).
+    if cc_wd == "☠️" and cc_sd:
+        cc_sd = "☠️"
+    if cx_wd == "☠️" and cx_sd:
+        cx_sd = "☠️"
     title = (f"{cc_sd}CC{cc_sv}│{cc_wv}{cc_wd}"
              f" {cx_sd}Cx{cx_sv}│{cx_wv}{cx_wd}")
     print(f"{title} | font=Menlo size=12")
