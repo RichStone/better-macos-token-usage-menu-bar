@@ -44,11 +44,16 @@ def load_state():
 
 
 def save_state(state):
-    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+    cache_dir = os.path.dirname(CACHE_FILE)
+    os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+    os.chmod(cache_dir, 0o700)  # tighten if the dir already existed looser
     tmp = CACHE_FILE + ".tmp"
-    with open(tmp, "w") as f:
+    # O_NOFOLLOW + mode 0o600 up front: cached responses hold account metadata
+    # (email, plan, ids), so the tmp file must never be briefly world-readable
+    # (default open() mode is 0644 pre-umask) or follow a planted symlink.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(state, f)
-    os.chmod(tmp, 0o600)  # cached responses hold account metadata (email, plan, ids)
     os.replace(tmp, CACHE_FILE)
 
 
@@ -367,6 +372,18 @@ def fmt_reset(value):
         return "?"
 
 
+def clean(text):
+    """Strip SwiftBar's own line/param separators from a string we're about to
+    print. SwiftBar splits a plugin line on its FIRST '|' and, on an unterminated
+    quote, consumes the rest of the line as that param's value — so any untrusted
+    text reaching a printed line unescaped (a provider API field, a poisoned cache
+    entry) could smuggle extra params (e.g. a hidden bash= action) or fabricate
+    whole new rows via an embedded newline. Every provider-derived value ends up
+    in one of these lines, so sanitize at the print choke point instead of chasing
+    every call site."""
+    return str(text).replace("|", "¦").replace("\n", " ").replace("\r", " ")
+
+
 def line(text, **params):
     # AppKit dims action-less (disabled) menu rows even when they have an explicit
     # color, so every row gets an action: real ones keep theirs, the rest get a
@@ -379,7 +396,7 @@ def line(text, **params):
     ] if p]
     if not (params.get("href") or params.get("refresh")):
         parts.append("bash=/usr/bin/true terminal=false")
-    return f"{text} | {' '.join(parts)}"
+    return f"{clean(text)} | {' '.join(parts)}"
 
 
 def main():
@@ -463,7 +480,7 @@ def main():
         cx_sd = "☠️"
     title = (f"{cc_sd}CC{cc_sv}│{cc_wv}{cc_wd}"
              f" {cx_sd}Cx{cx_sv}│{cx_wv}{cx_wd}")
-    print(f"{title} | font=Menlo size=12")
+    print(f"{clean(title)} | font=Menlo size=12")
     print("---")
 
     # --- Claude Code section ---
@@ -509,7 +526,7 @@ def main():
 
     # --- Codex section ---
     plan = f" ({codex.get('plan_type')})" if codex and codex.get("plan_type") else ""
-    print(f"Codex{plan} | size=13 color=#000000,#ffffff bash=/usr/bin/true terminal=false")
+    print(f"{clean(f'Codex{plan}')} | size=13 color=#000000,#ffffff bash=/usr/bin/true terminal=false")
     if codex:
         for label, w in (("Session", cx_session), ("Weekly", cx_weekly)):
             if w:
@@ -545,7 +562,7 @@ def main():
 
     # --- Copilot section (dropdown only, deliberately not in the menu bar title) ---
     cp_plan = f" ({copilot.get('copilot_plan')})" if copilot and copilot.get("copilot_plan") else ""
-    print(f"Copilot{cp_plan} | size=13 color=#000000,#ffffff bash=/usr/bin/true terminal=false")
+    print(f"{clean(f'Copilot{cp_plan}')} | size=13 color=#000000,#ffffff bash=/usr/bin/true terminal=false")
     if copilot:
         names = {"premium_interactions": "Premium", "chat": "Chat", "completions": "Complete"}
         unlimited = []
