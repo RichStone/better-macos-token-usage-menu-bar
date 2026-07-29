@@ -22,7 +22,6 @@ FIVE_HOUR_SECONDS = 5 * 3600
 SEVEN_DAY_SECONDS = 7 * 86400
 
 CACHE_FILE = os.path.expanduser("~/.cache/ai-usage-bar/state.json")
-STALE_AFTER = 30 * 60  # mark cached data stale after 30 min
 CLAUDE_POLL = 5 * 60  # Anthropic's usage endpoint 429s under 1-minute polling; ask it less often
 
 # Monthly billing-cycle renewal day (1-31) per provider, shown in the dropdown as
@@ -332,7 +331,10 @@ def color_for(remaining):
 
 def cell(remaining, unknown, sev="green"):
     """(value, dot) for one limit in the menu bar title.
-    - unknown (data stale or never fetched): a plain '–', never a healthy ball.
+    - unknown (no data ever cached for this provider): a plain '–', never a
+      healthy ball. Merely stale/erroring data with something cached does NOT
+      count as unknown — it still shows its last-known number, same as the
+      dropdown (which pairs it with a separate "stale" warning row instead).
     - reported-absent (remaining is None but the provider answered): this window
       isn't reported at all (e.g. Codex session on some plans) — omit the value
       and dot entirely rather than implying "all good" with a green ball.
@@ -400,8 +402,6 @@ def main():
     claude = claude or state.get("claude", {}).get("data")
     codex = codex or state.get("codex", {}).get("data")
     copilot = copilot or state.get("copilot", {}).get("data")
-    claude_stale = claude_err and (now - state.get("claude", {}).get("ts", 0)) > STALE_AFTER
-    codex_stale = codex_err and (now - state.get("codex", {}).get("ts", 0)) > STALE_AFTER
 
     # Roll any window whose reset has passed forward to the current period, so a cache
     # that straddled a reset boundary stops showing stale pre-reset numbers. Applied
@@ -424,11 +424,6 @@ def main():
     cx_s = win_left(cx_session) if codex else None
     cx_w = win_left(cx_weekly) if codex else None
 
-    if claude_stale:
-        cc_s = cc_w = None
-    if codex_stale:
-        cx_s = cx_w = None
-
     # Pace-based severity per window: how far the meter has fallen below its
     # even-burn line, hotter the further behind (see severity()). Claude's window
     # lengths are fixed (5h / 7d); Codex reports its own limit_window_seconds.
@@ -448,8 +443,14 @@ def main():
     # its pace independently: 🟢 on-track / 🟡 slipping / 🟠 behind / 🔴 way behind /
     # ☠️ out, nothing for a window the API doesn't report, and "–" when data is
     # unavailable.
-    cc_unknown = not claude or claude_stale
-    cx_unknown = not codex or codex_stale
+    # "Unknown" (–) is reserved for genuinely no data ever cached — NOT for merely
+    # stale/erroring data. A provider that's erroring but still has a cached payload
+    # keeps showing its last-known numbers in the title, exactly like the dropdown
+    # does (which shows the same numbers plus a separate "⚠ ... / showing data from
+    # X ago" row) — the title used to blank to "–" whenever stale, which read as
+    # "no idea" even though the dropdown one click away proved the number was known.
+    cc_unknown = not claude
+    cx_unknown = not codex
     cc_sv, cc_sd = cell(cc_s, cc_unknown, cc_s_sev)
     cc_wv, cc_wd = cell(cc_w, cc_unknown, cc_w_sev)
     cx_sv, cx_sd = cell(cx_s, cx_unknown, cx_s_sev)
