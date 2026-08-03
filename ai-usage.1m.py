@@ -269,6 +269,9 @@ HOW_COLORS_WORK = [
     "  you're close to empty and pace stops mattering.",
     "0% left shows ☠️ instead of 🔴 — you're not just critical, you're out.",
     "If weekly hits ☠️, session shows ☠️ too — a dead weekly blocks you either way.",
+    "Codex weekly folds in banked reset credits (each buys back a full window):",
+    "  '164% left' = 64% now + one reset (+100%). Set codex_count_reset_credits",
+    "  to false in the config to show the raw number instead.",
     "A dash (–) means that number failed to load this cycle — NOT that it's full.",
     "Other rows (Copilot, extra $, model-scoped weekly) use plain % left:",
     "  🟢 ≥60%   🟠 20-59%   🔴 <20%.",
@@ -441,6 +444,16 @@ def main():
     cx_s = win_left(cx_session) if codex else None
     cx_w = win_left(cx_weekly) if codex else None
 
+    # Banked Codex rate-limit reset credits each buy back a full window (~+100%),
+    # so they're real weekly headroom, not a footnote: fold them into the weekly
+    # figure (64% now + 1 reset => 164% effective). Applied to the WEEKLY window —
+    # it's the slow-to-refill one and the only one some plans report. Opt out with
+    # "codex_count_reset_credits": false in the config file.
+    count_resets = cfg.get("codex_count_reset_credits", True)
+    cx_resets = int(((codex or {}).get("rate_limit_reset_credits") or {}).get("available_count") or 0)
+    fold_resets = count_resets and cx_w is not None and cx_resets > 0
+    cx_w_eff = cx_w + 100 * cx_resets if fold_resets else cx_w
+
     # Pace-based severity per window: how far the meter has fallen below its
     # even-burn line, hotter the further behind (see severity()). Claude's window
     # lengths are fixed (5h / 7d); Codex reports its own limit_window_seconds.
@@ -450,7 +463,7 @@ def main():
                         SEVEN_DAY_SECONDS, now)
     cx_s_sev = severity(cx_s, reset_epoch((cx_session or {}).get("reset_at")),
                         (cx_session or {}).get("limit_window_seconds"), now)
-    cx_w_sev = severity(cx_w, reset_epoch((cx_weekly or {}).get("reset_at")),
+    cx_w_sev = severity(cx_w_eff, reset_epoch((cx_weekly or {}).get("reset_at")),
                         (cx_weekly or {}).get("limit_window_seconds"), now)
 
     # One status dot per limit, bookending each provider's two numbers: session's
@@ -471,7 +484,7 @@ def main():
     cc_sv, cc_sd = cell(cc_s, cc_unknown, cc_s_sev)
     cc_wv, cc_wd = cell(cc_w, cc_unknown, cc_w_sev)
     cx_sv, cx_sd = cell(cx_s, cx_unknown, cx_s_sev)
-    cx_wv, cx_wd = cell(cx_w, cx_unknown, cx_w_sev)
+    cx_wv, cx_wd = cell(cx_w_eff, cx_unknown, cx_w_sev)
     # A dead weekly limit blocks you regardless of session headroom — flag session
     # ☠️ too (only when it has a dot to override; a blank/absent session stays blank).
     if cc_wd == "☠️" and cc_sd:
@@ -532,9 +545,15 @@ def main():
             if w:
                 wl = left(w.get("used_percent"))
                 m = "~" if w.get("_rolled") else ""
-                sev = severity(wl, reset_epoch(w.get("reset_at")), w.get("limit_window_seconds"), now)
-                print(line(f"{label:<8} {m}{pct(wl)}% left  ·  resets {fmt_reset(w.get('reset_at'))}",
+                folded = w is cx_weekly and fold_resets
+                shown = cx_w_eff if folded else wl
+                sev = severity(shown, reset_epoch(w.get("reset_at")), w.get("limit_window_seconds"), now)
+                print(line(f"{label:<8} {m}{pct(shown)}% left  ·  resets {fmt_reset(w.get('reset_at'))}",
                            color=SEV_COLOR.get(sev), mono=True))
+                if folded:
+                    plural = "s" if cx_resets > 1 else ""
+                    print(line(f"{'':<8} {pct(wl)}% now + {cx_resets} reset credit{plural} (+{100 * cx_resets}%)",
+                               color="gray", mono=True))
             else:
                 print(line(f"{label:<8} –  ·  not reported by the API", mono=True))
         for extra_lim in codex.get("additional_rate_limits") or []:
@@ -549,7 +568,7 @@ def main():
         if credits.get("has_credits"):
             print(line(f"Credits  {credits.get('balance')}", mono=True))
         resets = (codex.get("rate_limit_reset_credits") or {}).get("available_count")
-        if resets:
+        if resets and not fold_resets:  # when folded, the weekly breakdown already shows it
             print(line(f"Reset credits available: {resets}", mono=True))
     renewal = next_renewal(codex_day)
     if renewal:

@@ -90,10 +90,12 @@ open -a SwiftBar
 **Monthly plan renewal date.** Neither usage API exposes your billing-cycle renewal, so it's a manual setting that adds a "Renews <date>" row to each provider's dropdown (the widget computes the next occurrence and clamps to short months). Configure it in `~/.config/ai-usage-bar/config.json` — this survives re-downloading the script:
 
 ```json
-{ "claude_renewal_day": 1, "codex_renewal_day": 10 }
+{ "claude_renewal_day": 1, "codex_renewal_day": 10, "codex_count_reset_credits": true }
 ```
 
 Omit a key (or the whole file) to hide that row. As a fallback you can instead edit the `CLAUDE_RENEWAL_DAY` / `CODEX_RENEWAL_DAY` constants at the top of the script, but the config file is preferred since a re-download overwrites the script.
+
+**Codex reset credits (`codex_count_reset_credits`, default `true`).** Each banked Codex rate-limit reset credit buys back a full window, so it's genuine weekly headroom. By default the widget folds them into the Codex weekly figure — e.g. `64% now + 1 reset` shows as **164% left**, with the breakdown in the dropdown. Set this to `false` to display the raw weekly number and a separate `Reset credits available: N` row instead.
 
 **Everything easy to tweak** at the top of the script: poll interval, flat color thresholds in `color_for()`, and the pace-based `PACE_YELLOW`/`PACE_ORANGE`/`PACE_RED`/`ABS_ORANGE`/`ABS_RED` constants that grade session/weekly meters. Renewal days live in the config file above.
 
