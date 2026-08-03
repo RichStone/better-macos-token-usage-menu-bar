@@ -97,6 +97,8 @@ Omit a key (or the whole file) to hide that row. As a fallback you can instead e
 
 **Codex reset credits (`codex_count_reset_credits`, default `true`).** Each banked Codex rate-limit reset credit buys back a full window, so it's genuine weekly headroom. By default the widget folds them into the Codex weekly figure — e.g. `64% now + 1 reset` shows as **164% left**, with the breakdown in the dropdown. Set this to `false` to display the raw weekly number and a separate `Reset credits available: N` row instead.
 
+Reset credits expire ~30 days after they're granted, but the API only ever returns a *count* — no per-credit dates. So the widget keeps a small local ledger (in the state cache) that stamps each credit when it first appears and estimates its expiry, shown as `expires ~Sep 2` and turning orange within 3 days. The estimate can only start when the widget first sees a credit, so a credit banked before you installed reads as expiring later than it truly does.
+
 **Everything easy to tweak** at the top of the script: poll interval, flat color thresholds in `color_for()`, and the pace-based `PACE_YELLOW`/`PACE_ORANGE`/`PACE_RED`/`ABS_ORANGE`/`ABS_RED` constants that grade session/weekly meters. Renewal days live in the config file above.
 
 ## Security

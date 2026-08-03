@@ -224,6 +224,39 @@ def win_left(window):
     return left(window.get("used_percent")) if window else None
 
 
+RESET_CREDIT_TTL = 30 * 86400  # Codex reset credits expire ~30 days after granting
+
+
+def track_reset_credits(state, codex, now):
+    """Maintain a local ledger of Codex reset-credit grant times. The API reports
+    only a count, never per-credit expiry, so we stamp each newly-appeared credit
+    with the time we first saw it and reconcile the list to the live count every
+    fetch: extras are stamped `now` (their real grant may predate our first sight —
+    the estimate can only start when we do), a shrunk count drops oldest-first, and
+    anything past its TTL is pruned. No-op when Codex data is missing this cycle."""
+    if not codex:
+        return
+    current = int(((codex.get("rate_limit_reset_credits") or {}).get("available_count")) or 0)
+    led = state.setdefault("codex_reset_credits", {})
+    grants = sorted(t for t in (led.get("grants") or []) if now - t < RESET_CREDIT_TTL)
+    if len(grants) < current:
+        grants += [now] * (current - len(grants))
+    elif len(grants) > current:
+        grants = grants[len(grants) - current:]  # assume the oldest was used or expired
+    led["grants"] = sorted(grants)
+    led["count"] = current
+
+
+def reset_credit_expiry(state, now):
+    """(date_str, days_until) for the soonest-expiring tracked reset credit, or
+    (None, None). Estimated ~30 days after each credit was first observed locally."""
+    grants = (state.get("codex_reset_credits") or {}).get("grants") or []
+    if not grants:
+        return None, None
+    soonest = min(grants) + RESET_CREDIT_TTL
+    return datetime.fromtimestamp(soonest).strftime("%b %-d"), (soonest - now) / 86400
+
+
 # Everything is "% remaining". These thresholds and the palette are shared by the
 # dropdown row text and the menu-bar status dots.
 LOW, MID = 20, 60          # absolute remaining-% cutoffs for NON-windowed meters
@@ -272,6 +305,8 @@ HOW_COLORS_WORK = [
     "Codex weekly folds in banked reset credits (each buys back a full window):",
     "  '164% left' = 64% now + one reset (+100%). Set codex_count_reset_credits",
     "  to false in the config to show the raw number instead.",
+    "  Each credit's ~expiry is estimated locally (the API gives only a count), so",
+    "  164% can drop back toward 64% when an unused credit lapses (~30 days).",
     "A dash (–) means that number failed to load this cycle — NOT that it's full.",
     "Other rows (Copilot, extra $, model-scoped weekly) use plain % left:",
     "  🟢 ≥60%   🟠 20-59%   🔴 <20%.",
@@ -423,6 +458,12 @@ def main():
     codex = codex or state.get("codex", {}).get("data")
     copilot = copilot or state.get("copilot", {}).get("data")
 
+    # Ledger the Codex reset-credit count over time (persisted), so we can estimate
+    # each credit's ~30-day expiry the API never exposes. Saved now — before windows
+    # are rolled below — since rolled estimates are deliberately not persisted.
+    track_reset_credits(state, codex, now)
+    save_state(state)
+
     # Roll any window whose reset has passed forward to the current period, so a cache
     # that straddled a reset boundary stops showing stale pre-reset numbers. Applied
     # after save_state so the estimate is never persisted — the next successful fetch
@@ -450,7 +491,7 @@ def main():
     # it's the slow-to-refill one and the only one some plans report. Opt out with
     # "codex_count_reset_credits": false in the config file.
     count_resets = cfg.get("codex_count_reset_credits", True)
-    cx_resets = int(((codex or {}).get("rate_limit_reset_credits") or {}).get("available_count") or 0)
+    cx_resets = int((state.get("codex_reset_credits") or {}).get("count") or 0)
     fold_resets = count_resets and cx_w is not None and cx_resets > 0
     cx_w_eff = cx_w + 100 * cx_resets if fold_resets else cx_w
 
@@ -552,8 +593,11 @@ def main():
                            color=SEV_COLOR.get(sev), mono=True))
                 if folded:
                     plural = "s" if cx_resets > 1 else ""
-                    print(line(f"{'':<8} {pct(wl)}% now + {cx_resets} reset credit{plural} (+{100 * cx_resets}%)",
-                               color="gray", mono=True))
+                    exp_date, exp_days = reset_credit_expiry(state, now)
+                    exp_txt = f"  ·  {'next ' if cx_resets > 1 else ''}expires ~{exp_date}" if exp_date else ""
+                    sub_color = COLOR_ORANGE if (exp_days is not None and exp_days <= 3) else "gray"
+                    print(line(f"{'':<8} {pct(wl)}% now + {cx_resets} reset credit{plural} (+{100 * cx_resets}%){exp_txt}",
+                               color=sub_color, mono=True))
             else:
                 print(line(f"{label:<8} –  ·  not reported by the API", mono=True))
         for extra_lim in codex.get("additional_rate_limits") or []:
